@@ -185,15 +185,17 @@ def mmd_edit_actions(actions: Annotated[list[edit_actions.Action], Field(min_len
 @mcp.tool(annotations=EDIT)
 def mmd_transfer_effect_assignments(operation: Literal["export", "import"], path: str,
                                       overwrite: Annotated[bool, Field(strict=True)] = False,
-                                      hwnd: int | None = None) -> dict[str, Any]:
+                                      hwnd: int | None = None,
+                                      encoding: Literal["cp932", "cp936"] | None = None) -> dict[str, Any]:
     """Export live MME assignments to EMM, or import EMM into the current scene.
 
     Opens/closes MME's assignment dialog without reloading PMM. Use export ->
     mmd_write_effect_assignments -> import -> export to verify edited assignments.
     Requires MME installed. Unknown dialogs remain open and are returned for inspection.
     Output must be new unless overwrite=true. Import may replace effect assignments.
+    encoding defaults to the local MME ANSI code page. Retain it for offline EMM edits.
     """
-    return effects_live.transfer(operation, path, overwrite, hwnd)
+    return effects_live.transfer(operation, path, overwrite, hwnd, encoding=encoding)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -329,7 +331,7 @@ def mmd_batch_camera_keys(items: list[camera_batch.CameraFrame], return_to_frame
 
 
 @mcp.tool(annotations=READ_ONLY)
-def mmd_read_effect_assignments(emm_path: str) -> dict[str, Any]:
+def mmd_read_effect_assignments(emm_path: str, encoding: Literal["cp932", "cp936"] = "cp932") -> dict[str, Any]:
     """Read a saved MMEffect assignment file (.emm), including all offscreen render targets.
 
     objects maps file IDs (not UI indices) to paths. effect_sections maps exact section
@@ -337,15 +339,17 @@ def mmd_read_effect_assignments(emm_path: str) -> dict[str, Any]:
     assignments and explicit visibility overrides. Subsets use Pmd3[173]. effects retains
     the legacy Main-only view; sections contains raw entries. Does not inspect live MMD.
     Export current assignments from MME or save the PMM with assignment auto-save on first.
+    Use the encoding returned by the live export (cp936 on CP936 Windows).
     """
-    return effects.read_emm(emm_path)
+    return effects.read_emm(emm_path, encoding=encoding)
 
 
 @mcp.tool(annotations=EDIT)
 def mmd_write_effect_assignments(emm_path: str, assignments: dict[str, str | None] | None = None,
                                  create_from_pmm: str | None = None,
                                  sections: list[effects.EffectSectionPatch] | None = None,
-                                 output_path: str | None = None) -> dict[str, Any]:
+                                 output_path: str | None = None,
+                                 encoding: Literal["cp932", "cp936"] = "cp932") -> dict[str, Any]:
     """Patch Main and/or multiple offscreen sections of an existing .emm in one call.
 
     sections: [{section: "Effect@MaterialMap", assignments: {"Pmd3[2]": "material.fx"},
@@ -354,13 +358,14 @@ def mmd_write_effect_assignments(emm_path: str, assignments: dict[str, str | Non
     Optional assignments is the legacy shorthand for Main (Effect); do not repeat a section.
     Null removes an effect (none); visibility false hides it in that render target. Paths are
     absolute or relative to MMD, not the EMM. Legacy dotted subset input is normalized to brackets.
-    Owner, Default, comments and unedited entries are preserved. All changes validate before
+    Owner, Default, comments and unedited entries are preserved. Use the encoding from export.
+    All changes validate before
     writing. Omit output_path to replace the source; specify a NEW absolute .emm path to keep it.
     File edit only: import via MME's File > Load settings or reload the adjacent PMM to apply.
     create_from_pmm remains reserved and refused. No live MMD, model, frame or PMM changes.
     """
     return effects.write_emm(emm_path, assignments, create_from_pmm,
-                             sections=sections, output_path=output_path)
+                             sections=sections, output_path=output_path, encoding=encoding)
 
 
 @mcp.tool(annotations=READ_ONLY)

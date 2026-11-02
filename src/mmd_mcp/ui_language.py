@@ -1,4 +1,4 @@
-"""Exact Japanese/English labels for the verified MMD 9.32 executable.
+"""Exact Japanese/English labels and observed Chinese-patch UI aliases.
 
 Windows common dialogs follow the OS language independently of MMD's mode.
 Unknown translations are deliberately not accepted.
@@ -6,7 +6,7 @@ Unknown translations are deliberately not accepted.
 
 # Native spelling/capitalization (including typos) is intentional.
 LABELS = {
-    "カメラ編": ("camera", "To camera"), "モデル編": "To model", "全ボーンﾌﾚｰﾑ": "All bone",
+    "カメラ編": ("camera", "To camera", "相機編"), "モデル編": ("To model", "模型編"), "全ボーンﾌﾚｰﾑ": "All bone",
     "新規作成": ("new", "delete lip frame"), "モデル削除": "model delete", "アクセサリ削除": "delete accessory",
     "モーションデータ読込": "load motion data", "ポーズデータ読込": "load pose data",
     "モーションデータ保存": "save motion data", "ポーズデータ保存": "save pose data",
@@ -29,6 +29,9 @@ LABELS = {
     "時間拡大(縮小)率": "expand/shrink",
     "エフェクトファイル割り当て": "Map Effect File",
     "外部親設定": "outside parent(OP) setting",
+    # Observed Windows shell title; independent of MMD's editing language.
+    "Save As": "另存为",
+    "Open": "打开",
 }
 
 
@@ -48,6 +51,6 @@ def english_mode(reader):
     label = reader.text(reader.control(536, "Button"))
     if label in {"camera", "To camera", "To model"}:
         return True
-    if label in {"カメラ編", "モデル編"}:
+    if label in {"カメラ編", "モデル編", "相機編", "模型編"}:
         return False
     raise ValueError("Unsupported MMD UI language or editing mode.")

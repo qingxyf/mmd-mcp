@@ -1,5 +1,7 @@
 """Native MME settings export/import without reloading the PMM."""
 
+import ctypes
+
 from . import effects, native_dialogs as dialogs
 from .file_operations import file_path, run_dialog_flow
 from .scene_controls import mutation, context
@@ -8,11 +10,16 @@ from .ui_state import UIReader
 TITLE = "エフェクトファイル割り当て"
 
 
-def transfer(kind, path, overwrite=False, hwnd=None):
+def transfer(kind, path, overwrite=False, hwnd=None, *, encoding=None):
+    # MME writes ANSI paths in the Windows active code page. Keep the original
+    # Japanese default elsewhere, and allow an explicit override for imported files.
+    if encoding is None:
+        encoding = 'cp936' if ctypes.windll.kernel32.GetACP() == 936 else effects.ENCODING
+    effects.validate_encoding(encoding)
     output = kind == "export"
     candidate = file_path(path, {".emm"}, write=output, overwrite=overwrite)
     if not output:
-        data = effects.read_emm(str(candidate))
+        data = effects.read_emm(str(candidate), encoding=encoding)
         if not data["objects"]:
             raise ValueError("EMM contains no objects to import.")
     stamp = candidate.stat().st_mtime_ns if output and candidate.exists() else None
@@ -33,8 +40,8 @@ def transfer(kind, path, overwrite=False, hwnd=None):
                     result["status"] = "verification_failed"
                     result["note"] = "MME did not write a new nonempty assignment file."
                 else:
-                    result["assignments"] = effects.read_emm(str(candidate))
-        return {"operation": kind, "path": str(candidate), **result,
+                    result["assignments"] = effects.read_emm(str(candidate), encoding=encoding)
+        return {"operation": kind, "path": str(candidate), "encoding": encoding, **result,
                 "applied_to_mmd": not output and result["status"] == "completed",
                 "saved_to_disk": output and result["status"] == "completed",
                 "note_on_import": "MME matches loaded objects itself. Export again to verify assignments; unknown confirmation/error dialogs remain open."}
