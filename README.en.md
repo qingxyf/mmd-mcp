@@ -12,6 +12,10 @@ A scene created with mmd-mcp, shown in MMD. Model: Tda Hatsune Miku V4X / Tda. H
 
 MMD 9.32 x64, Windows, and Python 3.10 x64. The verified Japanese distribution's built-in **English Mode** is supported alongside Japanese mode. Windows common dialogs follow the OS language independently; live validation currently uses Japanese Windows. English Windows dialog labels are accepted, but that OS configuration has not been tested end to end.
 
+This compatibility branch adds selected Chinese-patch UI labels and CP936 EMM support.
+See the [中文 / 日本語 / English compatibility guide](docs/zh-ja-patched-mme.md) for scope, limitations, and usage.
+It does not add bone-memory support for modified executables.
+
 ## Bone-selection DLL
 
 Bone memory inspection and selection require this exact executable SHA-256:

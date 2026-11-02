@@ -1,6 +1,6 @@
 """Read and patch MMEffect assignment files without changing the live MMD scene.
 
-Observed MME v3 format: CP932, [Object] maps transient Pmd/Acs IDs to files,
+Observed MME v3 format: CP932/CP936, [Object] maps transient Pmd/Acs IDs to files,
 [Effect] is Main, and [Effect@<render target>] retains an Owner object ID.
 Material subsets use Pmd3[173], not Pmd3.173. Visibility is a separate .show key.
 """
@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, model_validator
 
 ENCODING = 'cp932'
+ENCODINGS = {'cp932', 'cp936'}
 MAX_BYTES = 4 * 1024 * 1024
 TARGET = re.compile(r'((?:Pmd|Acs)\d+)(?:\[(\d+)\])?')
 LEGACY_SUBSET = re.compile(r'((?:Pmd|Acs)\d+)\.(\d+)')
@@ -44,14 +45,21 @@ def _path(emm_path):
     return path
 
 
-def _read(emm_path):
+def validate_encoding(encoding):
+    if encoding not in ENCODINGS:
+        raise ValueError('EMM encoding must be cp932 (Japanese) or cp936 (Chinese).')
+    return encoding
+
+
+def _read(emm_path, encoding=ENCODING):
+    validate_encoding(encoding)
     path = _path(emm_path)
     if not path.is_file() or path.stat().st_size > MAX_BYTES:
         raise ValueError('EMM file is missing or too large.')
     data = path.read_bytes()
     if len(data) > MAX_BYTES:
         raise ValueError('EMM file is too large.')
-    sections, order = parse(data.decode(ENCODING))
+    sections, order = parse(data.decode(encoding))
     return path, data, sections, order
 
 
@@ -84,8 +92,8 @@ def _is_effect_section(name):
     return name == 'Effect' or name.startswith('Effect@') and len(name) > len('Effect@')
 
 
-def read_emm(emm_path):
-    path, _, sections, order = _read(emm_path)
+def read_emm(emm_path, *, encoding=ENCODING):
+    path, _, sections, order = _read(emm_path, encoding)
     objects = dict(sections.get('Object', []))
     effects = dict(sections.get('Effect', []))
     effect_sections = {}
@@ -106,7 +114,8 @@ def read_emm(emm_path):
             'assignments': assignments, 'visibility': visibility,
         }
     return {
-        'path': str(path), 'version': dict(sections.get('Info', [])).get('Version'),
+        'path': str(path), 'encoding': encoding,
+        'version': dict(sections.get('Info', [])).get('Version'),
         'objects': objects,
         # Keep the original Main-only response for existing callers.
         'effects': {key: None if value.lower() == 'none' else value for key, value in effects.items()},
@@ -143,7 +152,7 @@ def _effect_value(value):
     return value
 
 
-def _patch_bytes(data, changes):
+def _patch_bytes(data, changes, encoding=ENCODING):
     """Replace only requested values; retain every untouched byte, including comments."""
     pending = {name: dict(entries) for name, entries in changes.items()}
     newline_match = re.search(br'\r\n|\n|\r', data)
@@ -154,10 +163,10 @@ def _patch_bytes(data, changes):
         entries = pending.pop(name, {})
         if entries and out and not out[-1].endswith((b'\r', b'\n')):
             out.append(newline)
-        out.extend(f'{key} = {value}'.encode(ENCODING) + newline for key, value in entries.items())
+        out.extend(f'{key} = {value}'.encode(encoding) + newline for key, value in entries.items())
 
     for raw in data.splitlines(keepends=True):
-        line = raw.decode(ENCODING).strip()
+        line = raw.decode(encoding).strip()
         if line.startswith('[') and line.endswith(']'):
             append_entries(current)
             current = line[1:-1]
@@ -171,14 +180,14 @@ def _patch_bytes(data, changes):
                     prefix, old = body.split(b'=', 1)
                     leading = old[:len(old) - len(old.lstrip(b' \t'))]
                     trailing = old[len(old.rstrip(b' \t')):]
-                    raw = prefix + b'=' + leading + value.encode(ENCODING) + trailing + raw[len(body):]
+                    raw = prefix + b'=' + leading + value.encode(encoding) + trailing + raw[len(body):]
         out.append(raw)
     append_entries(current)
     # Only Main may be added. Offscreen sections must already have a verified Owner.
     for name in list(pending):
         if out and not out[-1].endswith((b'\r', b'\n')):
             out.append(newline)
-        out.append(f'[{name}]'.encode(ENCODING) + newline)
+        out.append(f'[{name}]'.encode(encoding) + newline)
         append_entries(name)
     return b''.join(out)
 
@@ -205,7 +214,7 @@ def _write(path, original, data, output_path):
     return path
 
 
-def write_emm(emm_path, assignments=None, create_from_pmm=None, *, sections=None, output_path=None):
+def write_emm(emm_path, assignments=None, create_from_pmm=None, *, sections=None, output_path=None, encoding=ENCODING):
     if create_from_pmm is not None:
         raise ValueError('Creating an .emm from scratch is not supported; export the current '
                          'assignments in MME or save the project with assignment auto-save on.')
@@ -213,7 +222,7 @@ def write_emm(emm_path, assignments=None, create_from_pmm=None, *, sections=None
     patches.extend(EffectSectionPatch.model_validate(p) for p in sections or [])
     if not patches:
         raise ValueError('Provide assignments or at least one section patch.')
-    path, original, document, _ = _read(emm_path)
+    path, original, document, _ = _read(emm_path, encoding)
     objects = dict(document.get('Object', []))
     changes, changed_sections = {}, {}
     for patch in patches:
@@ -242,12 +251,12 @@ def write_emm(emm_path, assignments=None, create_from_pmm=None, *, sections=None
             visibility[key] = visible
         changes[name] = entries
         changed_sections[name] = {'assignments': changed, 'visibility': visibility}
-    data = _patch_bytes(original, changes)
+    data = _patch_bytes(original, changes, encoding)
     if len(data) > MAX_BYTES:
         raise ValueError('Edited EMM would be too large.')
     destination = _write(path, original, data, output_path)
     return {
-        'path': str(destination), 'source_path': str(path),
+        'path': str(destination), 'source_path': str(path), 'encoding': encoding,
         'changed': changed_sections.get('Effect', {}).get('assignments', {}),
         'changed_sections': changed_sections, 'bytes': len(data),
         'applied_to_mmd': False, 'note': APPLY_NOTE,

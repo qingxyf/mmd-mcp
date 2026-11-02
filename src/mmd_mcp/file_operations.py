@@ -133,13 +133,19 @@ def filename_edit(dialog):
     for control in dialog["controls"]:
         if control["class"] != "Edit":
             continue
-        parent = win32gui.GetParent(control["hwnd"])
-        if control["id"] == 1148 and win32gui.GetClassName(parent) == "ComboBox":
-            matches.append(control["hwnd"])
-        elif control["id"] == 1001 and win32gui.GetClassName(parent) == "ComboBox":
-            grandparent = win32gui.GetParent(parent)
-            if win32gui.GetClassName(grandparent) == "FloatNotifySink":
+        try:
+            parent = win32gui.GetParent(control["hwnd"])
+            if control["id"] == 1148 and win32gui.GetClassName(parent) == "ComboBox":
                 matches.append(control["hwnd"])
+            elif control["id"] == 1001 and win32gui.GetClassName(parent) == "ComboBox":
+                grandparent = win32gui.GetParent(parent)
+                if win32gui.GetClassName(grandparent) == "FloatNotifySink":
+                    matches.append(control["hwnd"])
+        except win32gui.error as error:
+            # The shell destroys controls asynchronously after submitting a file.
+            # Ignore only an observed vanished control, never a live-window error.
+            if error.winerror != 1400 or win32gui.IsWindow(control["hwnd"]):
+                raise
     return matches[0] if len(matches) == 1 else None
 
 
@@ -204,7 +210,7 @@ def run_dialog_flow(target, path, *, model_info=False, overwrite=False, timeout=
                     submitted = True
                 elif dialog["title"] in variants(FILE_DIALOG_TITLES) and any(
                         c["class"] == "Button" and c["id"] == 1
-                        and c["text"] in {"保存(&S)", "開く(&O)", "保存", "開く", "&Save", "&Open", "Save", "Open"}
+                        and c["text"] in {"保存(&S)", "開く(&O)", "打开(&O)", "保存", "開く", "&Save", "&Open", "Save", "Open"}
                         for c in dialog["controls"]):
                     # The shell may still be creating the filename control.
                     continue

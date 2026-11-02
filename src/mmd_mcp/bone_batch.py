@@ -173,19 +173,25 @@ def batch_bone_keys(items, model_path=None, return_to_frame=True, hwnd=None):
         if not matches(reader.text(reader.control(536, 'Button')), 'カメラ編'):
             raise ValueError('Switch MMD to bone editing mode before keying bones.')
         origin = int(anchor[0])
-        memory = BoneMemory(reader.target)
+        # MME controllers expose their parameters as morphs. Those controls are
+        # ordinary UI operations and do not depend on private bone memory/DLLs.
+        needs_bones = any(item.bones or item.pose is not None for item in items)
+        memory = BoneMemory(reader.target) if needs_bones else None
         try:
-            progress['operation_mode_switched_from'] = memory.ensure_selectable_mode(reader)
-            snapshot = inspect_bones(memory, anchor[2], english=english_mode(reader))
-            counts = {}
-            for bone in snapshot['bones']:
-                counts[bone['name']] = counts.get(bone['name'], 0) + 1
-            table = {b['name']: b['index'] for b in snapshot['bones'] if counts[b['name']] == 1}
-            if profile is not None:
-                if [b['name'] for b in snapshot['bones']] != [b['name'] for b in profile['bones']]:
-                    raise ValueError('Active model bone signature does not match model_path.')
-            reader.deadline = time.monotonic() + STEP_SECONDS
-            exposed = exposed_bone_names(reader.combo(434)['items'])
+            table, exposed = {}, set()
+            progress['operation_mode_switched_from'] = None
+            if memory is not None:
+                progress['operation_mode_switched_from'] = memory.ensure_selectable_mode(reader)
+                snapshot = inspect_bones(memory, anchor[2], english=english_mode(reader))
+                counts = {}
+                for bone in snapshot['bones']:
+                    counts[bone['name']] = counts.get(bone['name'], 0) + 1
+                table = {b['name']: b['index'] for b in snapshot['bones'] if counts[b['name']] == 1}
+                if profile is not None:
+                    if [b['name'] for b in snapshot['bones']] != [b['name'] for b in profile['bones']]:
+                        raise ValueError('Active model bone signature does not match model_path.')
+                reader.deadline = time.monotonic() + STEP_SECONDS
+                exposed = exposed_bone_names(reader.combo(434)['items'])
             for frame, (bones, item, _) in plan.items():
                 for name in bones:
                     if name not in table:
@@ -204,7 +210,10 @@ def batch_bone_keys(items, model_path=None, return_to_frame=True, hwnd=None):
                     record['fk'] = fk
                 try:
                     reader.deadline = time.monotonic() + STEP_SECONDS
-                    scene.commit_number(reader, 417, frame)
+                    # Re-entering the current frame can discard unregistered
+                    # scene edits. Morph-only adjustments need no such seek.
+                    if memory is not None or int(scene.context(reader, 'model')[0]) != frame:
+                        scene.commit_number(reader, 417, frame)
                     if int(scene.context(reader, 'model')[0]) != frame:
                         raise RuntimeError('MMD did not display the requested frame.')
                     for name, axes in bones.items():
@@ -228,7 +237,8 @@ def batch_bone_keys(items, model_path=None, return_to_frame=True, hwnd=None):
             except (ValueError, RuntimeError) as exc:
                 return stop('completed_unverified', f'Final check failed: {exc}')
         finally:
-            memory.close()
+            if memory is not None:
+                memory.close()
     progress['timing']['total_seconds'] = _elapsed(start)
     bone_count = sum(len(f['bones']) for f in progress['frames_completed'])
     # Keep the response small: per frame, bone names and morph results (values were verified by readback).

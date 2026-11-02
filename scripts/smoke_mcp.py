@@ -76,6 +76,37 @@ async def check(capture: bool, state: bool = False, bones: bool = False, hwnd: i
                 })
                 assert invalid.isError, invalid
             print('EMM offscreen section/subset edit, visibility, source protection and schema: OK')
+            # Chinese paths must survive the actual MCP encoding parameter roundtrip.
+            # These are synthetic fixtures; no live MME assignments are imported.
+            with tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / 'source.emm'
+                destination = Path(directory) / 'edited.emm'
+                original = ('[Object]\r\nPmd1 = 模型/示例模型.pmx\r\n'
+                            '[Effect]\r\nPmd1 = none\r\n').encode('cp936')
+                source.write_bytes(original)
+                result = await session.call_tool('mmd_read_effect_assignments', {
+                    'emm_path': str(source), 'encoding': 'cp936',
+                })
+                assert not result.isError, result
+                assert result.structuredContent['objects']['Pmd1'] == '模型/示例模型.pmx'
+                result = await session.call_tool('mmd_write_effect_assignments', {
+                    'emm_path': str(source), 'output_path': str(destination), 'encoding': 'cp936',
+                    'assignments': {'Pmd1': '效果/主渲染.fx'},
+                })
+                assert not result.isError, result
+                assert result.structuredContent['encoding'] == 'cp936'
+                assert result.structuredContent['applied_to_mmd'] is False
+                result = await session.call_tool('mmd_read_effect_assignments', {
+                    'emm_path': str(destination), 'encoding': 'cp936',
+                })
+                assert not result.isError, result
+                assert result.structuredContent['effects']['Pmd1'] == '效果/主渲染.fx'
+                assert source.read_bytes() == original
+                invalid = await session.call_tool('mmd_read_effect_assignments', {
+                    'emm_path': str(source), 'encoding': 'utf-7',
+                })
+                assert invalid.isError, invalid
+            print('CP936 EMM paths, encoding schema, source protection and invalid-encoding refusal: OK')
             if state:
                 for name in ("mmd_list_models", "mmd_get_ui_state"):
                     result = await session.call_tool(name, target)
